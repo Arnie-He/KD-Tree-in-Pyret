@@ -1,0 +1,172 @@
+# K-D tree library by Naicheng He
+
+provide:
+  generate-kdtree, closest-node, coor, type Coor
+end
+
+NUM-MAX = 65535
+
+data Coor: coor(current :: Number, next :: Option<Coor>) end
+
+data Kd-Tree: 
+  | mt 
+  | node(c :: Coor, left :: Kd-Tree, right :: Kd-Tree)
+end
+
+fun generate-kdtree(loc :: List<Coor>) -> Kd-Tree:
+  doc: ``` Uses a list of coordinates to generate a kd-tree```
+  md = loc.foldr(lam(elt, acc): num-max(get-depth(elt), acc) end, 0)
+  gen(loc, 0, md)
+end
+
+fun get-depth(c :: Coor) -> Number:
+  cases (Option) c.next:
+    | none => 1
+    | some(v) => 1 + get-depth(v)
+  end
+end
+
+fun rebalance(ll :: List<Coor>, rl :: List<Coor>, 
+    target :: Number, depth :: Number) -> {List<Coor>; List<Coor>}:
+  doc: ``` Rebalance the left list and the right list so that all the coor
+       with depth value equal to target in the left list will be transferred 
+       to the right list```
+  cases (List) ll:
+    | empty => {empty; rl}
+    | link(f,r) =>
+      if get-kth-dim(f, depth) == target:
+        rebalance(r, link(f,rl), target, depth)
+      else:
+        {x; y} = rebalance(r, rl, target, depth)
+        {link(f,x); y}
+      end
+  end
+
+where:
+  rebalance([list: coor(1, none), coor(2, none), coor(2, none), coor(2, none)],
+    [list: coor(2, none), coor(3, none)], 2, 0) is 
+  {[list: coor(1, none)]; [list: coor(2, none), coor(2, none), 
+      coor(2, none), coor(2, none), coor(3, none)]}
+end
+
+fun gen(loc :: List<Coor>, depth :: Number, md :: Number) -> Kd-Tree:
+  doc: ``` Generates the kd-tree```
+  cases (List) loc:
+    | empty => mt
+    | link(_,_) =>
+      d = num-modulo(depth, md)
+      sorted-list = loc.sort-by(
+        {(x, y): get-kth-dim(x, d) < get-kth-dim(y, d)},
+        {(x, y): get-kth-dim(x, d) == get-kth-dim(y, d)})
+      len = sorted-list.length()
+      rc = if num-modulo(len, 2) == 1: (len - 1) / 2 else: len / 2 end
+      lf = sorted-list.split-at(rc).prefix
+      rf = sorted-list.split-at(rc).suffix
+      {l; r} = rebalance(lf, rf, get-kth-dim(rf.first, d), d)
+      node(r.first, gen(l, d + 1, md), gen(r.rest, d + 1, md))
+  end
+end
+
+fun get-kth-dim(c :: Coor, k :: Number) -> Number:
+  doc: ``` Get the kth-dimension value of c```
+  if k == 0 : c.current
+  else: 
+    cases (Option) c.next:
+      | none => 
+        # If a node only has less than k dimensions, all higher dimensions are 0
+        0 
+      | some(v) =>
+        get-kth-dim(v, k - 1)
+    end
+  end
+
+where:
+  get-kth-dim(coor(1, some(coor(2, some(coor(3, some(coor(4, none))))))), 3) is 4
+end
+
+fun sqr-dis(coor1 :: Coor, coor2 :: Coor) -> Number:
+  doc: ``` get the squared-disance from coor1 to coor2```
+  get-distance(some(coor1), some(coor2))
+end
+
+fun get-distance(coor1 :: Option<Coor>, coor2 :: Option<Coor>) -> Number:
+  doc: ``` Compute the squared-distance from coor1 to coor2```
+  cases (Option) coor1:
+    | none => 
+      cases (Option) coor2:
+        | none => 0
+        | some(v2) => 
+          num-sqr(v2.current) + get-distance(none, v2.next)
+      end
+    | some(v1) =>
+      cases (Option) coor2:
+        | none =>
+          num-sqr(v1.current) + get-distance(v1.next, none)
+        | some(v-2) =>
+          num-sqr(v-2.current - v1.current) + get-distance(v1.next, v-2.next)
+      end
+  end
+end
+
+fun closest-node(kdt :: Kd-Tree, target :: Coor, md :: Number) -> {Coor; Number}:
+  doc: ``` takes in a kd-tree, a target coordinate, a maximum dimension
+       Find the closest node related to target, 
+       and the distance between them```
+  clos-node(kdt, target, 0, md)
+end
+
+fun clos-node(kdt :: Kd-Tree, target :: Coor, 
+    depth :: Number, md :: Number) -> {Coor; Number}:
+  cases (Kd-Tree) kdt:
+    | mt => {coor(0, none); NUM-MAX}
+    | node(c, l, r) =>
+      axis = num-modulo(depth, md)
+      next-branch = 
+        if get-kth-dim(c, axis) < get-kth-dim(target, axis):
+          r
+        else:
+          l
+        end
+      opp-branch = 
+        if get-kth-dim(c, axis) < get-kth-dim(target, axis):
+          l
+        else:
+          r
+        end
+      
+      {c-deep; n-deep} = clos-node(next-branch, target, axis + 1, md)
+      d = sqr-dis(c, target)
+      
+      if n-deep >= (get-kth-dim(c, axis) - get-kth-dim(target, axis)):
+        {c-opp; n-opp} = clos-node(opp-branch, target, axis + 1, md)
+        ask:
+          | (n-opp <= n-deep) and (n-opp <= d) then:
+            {c-opp; n-opp}
+          | (n-deep <= n-opp) and (n-deep <= d) then:
+            {c-deep; n-deep}
+          | otherwise:
+            {c; d}
+        end
+      else:
+        ask:
+          | n-deep <= d then:
+            {c-deep; n-deep}
+          | otherwise:
+            {c; d}
+        end
+      end
+      
+  end
+end
+
+coor1 = coor(11, some(coor(10, none)))
+coor2 = coor(4, some(coor(7, none)))
+coor3 = coor(16, some(coor(10, none)))
+coor4 = coor(9, some(coor(4, none)))
+coor5 = coor(7, some(coor(13, none)))
+coor6 = coor(15, some(coor(3, none)))
+coor7 = coor(14, some(coor(11, none)))
+
+kdt = generate-kdtree([list: coor1, coor2, coor3, coor4, coor5, coor6, coor7])
+
+closest-node(kdt, coor(14, some(coor(9, none))), 2)
